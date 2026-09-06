@@ -1,0 +1,6 @@
+{
+  "name": "حسابداری غزال",
+  "description": "یک سیستم جامع برای مدیریت ثبت‌نام، حقوق و دستمزد، هزینه‌ها و نمای کلی مالی آموزشگاه زبان.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
