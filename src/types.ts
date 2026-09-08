@@ -25,6 +25,7 @@ export interface Student {
   hasDiscount?: boolean;
   discountPercent?: number;
   discountAmount?: number;
+  hasReceipt?: boolean;
 }
 
 export interface TeacherSalary {

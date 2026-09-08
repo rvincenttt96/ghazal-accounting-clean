@@ -1,20 +1,39 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# پنل حسابداری آموزشگاه غزال
 
-# Run and deploy your AI Studio app
+سیستم ثبت‌نام، شهریه، حقوق اساتید و هزینه‌های آموزشگاه زبان غزال.
 
-This contains everything you need to run your app locally.
+رابط کاربری: React + Tailwind  
+بک‌اند روی هاست: PHP + MySQL (بدون نیاز به Node)
 
-View your app in AI Studio: https://ai.studio/apps/8b9844ed-8428-4b85-8cd9-1f5a153d478f
+آدرس پنل زنده: `https://acccounting.ghazalify.com`
 
-## Run Locally
+## مشکل قبلی که برطرف شد
 
-**Prerequisites:**  Node.js
+فرانت به مسیرهایی مثل `DELETE /api/students/12` درخواست می‌فرستاد، ولی PHP فقط `action=students` را می‌شناخت. برای همین دکمه‌های ثبت/حذف دیده می‌شدند اما حذف و ویرایش کار نمی‌کردند. مسیرها الان درست تجزیه می‌شوند.
 
+## اجرای محلی فرانت
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm install
+npm run dev
+```
+
+برای API لوکال، پوشه `api` را با PHP و MySQL بالا بیاورید و در Vite پروکسی `/api` را به آن بدهید، یا روی همان هاست تست کنید.
+
+## استقرار روی هاست PHP
+
+1. `npm run build`
+2. محتوای `dist/` را در `public_html` بریزید
+3. پوشه `api/` را در `public_html/api` بگذارید
+4. `api/config.example.php` را به `api/config.php` کپی کنید و اطلاعات دیتابیس را بگذارید
+5. فایل `.htaccess` ریشه را روی `public_html` قرار دهید
+6. جداول را از `php/schema.sql` بسازید اگر دیتابیس خالی است
+
+ورود پیش‌فرض نصب تازه: `admin` / `admin123` — بعد از نصب رمز را عوض کنید.
+
+## ساختار
+
+- `src/` رابط کاربری
+- `api/api.php` API اصلی
+- `api/config.example.php` نمونه تنظیمات دیتابیس
+- `.htaccess` تبدیل `/api/students/12` به PHP

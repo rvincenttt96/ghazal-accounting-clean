@@ -35,6 +35,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { Term, Student, TeacherSalary, Expense, Level } from './types';
+import { fetchJSON } from './api';
 
 type Section = 'overview' | 'registration' | 'payroll' | 'expenses';
 
@@ -62,19 +63,20 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileSearch, setShowMobileSearch] = useState(false);
 
-  const fetchJSON = async (url: string, options?: RequestInit) => {
-    const res = await fetch(url, options);
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP error! status: ${res.status}, body: ${text.slice(0, 100)}`);
-    }
-    const contentType = res.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      const text = await res.text();
-      throw new TypeError(`Expected JSON, got ${contentType}. Body: ${text.slice(0, 100)}`);
-    }
-    return await res.json();
-  };
+  useEffect(() => {
+    const raw = sessionStorage.getItem('ghazal-user');
+    if (!raw || user) return;
+    fetchJSON('/api/me')
+      .then((data) => {
+        if (data?.user) {
+          setUser(data.user);
+          setActiveSection(data.user.role === 'manager' ? 'overview' : 'registration');
+        } else {
+          sessionStorage.removeItem('ghazal-user');
+        }
+      })
+      .catch(() => sessionStorage.removeItem('ghazal-user'));
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -111,26 +113,27 @@ export default function App() {
     setIsLoggingIn(true);
     setLoginError('');
     try {
-      const res = await fetch('/api/login', {
+      const data = await fetchJSON('/api/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
+      if (data.success && data.user) {
+        sessionStorage.setItem('ghazal-user', JSON.stringify(data.user));
         setUser(data.user);
         setActiveSection(data.user.role === 'manager' ? 'overview' : 'registration');
       } else {
         setLoginError(data.message || 'نام کاربری یا رمز عبور اشتباه است');
       }
-    } catch (err) {
-      setLoginError('خطا در برقراری ارتباط با سرور');
+    } catch (err: any) {
+      setLoginError(err?.message || 'خطا در برقراری ارتباط با سرور');
     } finally {
       setIsLoggingIn(false);
     }
   };
 
   const handleLogout = () => {
+    fetchJSON('/api/logout', { method: 'POST' }).catch(() => {});
+    sessionStorage.removeItem('ghazal-user');
     setUser(null);
     setUsername('');
     setPassword('');
@@ -165,14 +168,11 @@ export default function App() {
   const handleDeleteTerm = async (id: string) => {
     if (!window.confirm('آیا از حذف این ترم اطمینان دارید؟')) return;
     try {
-      const res = await fetch(`/api/terms/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'خطا در حذف ترم');
-        return;
-      }
+      await fetchJSON(`/api/terms/${id}`, { method: 'DELETE' });
       setTerms(terms.filter((t: Term) => t.id !== id));
-    } catch (err) { console.error(err); }
+    } catch (err: any) {
+      alert(err?.message || 'خطا در حذف ترم');
+    }
   };
 
   const handleAddStudent = async (studentData: Omit<Student, 'id' | 'debt' | 'status'>) => {
@@ -234,11 +234,13 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (id: string) => {
+    if (!window.confirm('آیا از حذف این دانشجو اطمینان دارید؟ این کار قابل بازگشت نیست.')) return;
     try {
       await fetchJSON(`/api/students/${id}`, { method: 'DELETE' });
-      setStudents(students.filter((s: Student) => s.id !== id));
-    } catch (err) {
+      setStudents((prev) => prev.filter((s: Student) => String(s.id) !== String(id)));
+    } catch (err: any) {
       console.error(err);
+      alert(err?.message || 'حذف دانشجو انجام نشد.');
     }
   };
 
@@ -1337,11 +1339,11 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
     setReceiptModalStudent(student);
     setIsReceiptLoading(true);
     try {
-      const res = await fetch(`/api/receipts/${student.id}`);
-      const data = await res.json();
-      setStudentReceipts(data);
+      const data = await fetchJSON(`/api/receipts/${student.id}`);
+      setStudentReceipts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error(err);
+      setStudentReceipts([]);
     } finally {
       setIsReceiptLoading(false);
     }
@@ -1505,9 +1507,8 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
     const amount = Number(receiptAmount);
     
     try {
-      await fetch('/api/receipts', {
+      await fetchJSON('/api/receipts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           studentId: receiptModalStudent.id,
           termId: receiptModalStudent.termId,
@@ -1522,14 +1523,13 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
         ...receiptModalStudent,
         amountPaid: newPaid,
         debt: newDebt,
-        status: newDebt === 0 ? ('تسویه' as const) : ('بدهکار' as const)
+        status: newDebt === 0 ? 'paid' : 'unpaid'
       };
       
       printHTML(updatedStudentForPrint, amount, date);
       
-      const refreshRes = await fetch(`/api/receipts/${receiptModalStudent.id}`);
-      const data = await refreshRes.json();
-      setStudentReceipts(data);
+      const data = await fetchJSON(`/api/receipts/${receiptModalStudent.id}`);
+      setStudentReceipts(Array.isArray(data) ? data : []);
       setReceiptAmount('');
 
       if (typeof onUpdateStudent === 'function') {
@@ -1782,6 +1782,7 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
                     <th className="py-3 text-center">پرداخت شده</th>
                     <th className="py-3 text-center">مانده بدهی</th>
                     <th className="py-3 text-center">وضعیت</th>
+                    <th className="py-3 text-center">عملیات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-red-900/20">
@@ -1789,7 +1790,6 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
                     .filter((s: Student) => !selectedTermId || String(s.termId) === String(selectedTermId))
                     .filter((s: Student) => statusFilter === 'all' || s.status === statusFilter)
                     .filter((s: Student) => classTypeFilter === 'all' || s.classType === classTypeFilter)
-                    .reverse()
                     .map((s: Student) => (
                     <tr key={s.id} className="hover:bg-red-950/20 transition-colors group">
                       <td className="py-4 pr-4 font-medium text-white">
@@ -1813,71 +1813,6 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
                             </span>
                           ) : null}
                           
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenReceipts(s);
-                            }}
-                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-400 hover:text-sky-400 transition-all cursor-pointer"
-                            title="مدیریت و صدور رسید"
-                          >
-                            <Printer size={14} />
-                          </button>
-
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setVisiblePhoneId(visiblePhoneId === s.id ? null : s.id);
-                            }}
-                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-400 hover:text-white transition-all relative cursor-pointer"
-                          >
-                            <Phone size={14} />
-                            <AnimatePresence>
-                              {visiblePhoneId === s.id && (
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.9, x: 20 }}
-                                  animate={{ opacity: 1, scale: 1, x: 0 }}
-                                  exit={{ opacity: 0, scale: 0.9, x: 20 }}
-                                  className="absolute left-full mr-2 top-0 bg-[#12121C] text-white border border-red-500/30 px-3 py-1 rounded-xl text-xs whitespace-nowrap shadow-xl z-40 font-mono"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {s.phone || 'ثبت نشده'}
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </button>
-                          {s.receiptUrl && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedReceipt(s.receiptUrl || null);
-                              }}
-                              className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-400 hover:text-emerald-400 transition-all cursor-pointer"
-                              title="مشاهده رسید"
-                            >
-                              <Receipt size={14} />
-                            </button>
-                          )}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingStudent(s);
-                            }}
-                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-400 hover:text-sky-400 transition-all cursor-pointer"
-                            title="ویرایش پرداخت"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteStudent(s.id);
-                            }}
-                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-400 hover:text-rose-400 transition-all cursor-pointer"
-                            title="حذف دانشجو"
-                          >
-                            <Trash2 size={14} />
-                          </button>
                         </div>
                       </td>
                       <td className="py-4 text-slate-400 text-xs">{s.level}</td>
@@ -1899,6 +1834,89 @@ function RegistrationSection({ terms, students: rawStudents, levels, searchQuery
                         <span className={`px-3 py-1 rounded-full text-[10px] font-medium border ${s.status === 'paid' ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/40' : 'bg-rose-950/60 text-rose-400 border-rose-500/40'}`}>
                           {s.status === 'paid' ? 'تسویه' : 'بدهکار'}
                         </span>
+                      </td>
+                      <td className="py-4 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenReceipts(s);
+                            }}
+                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-300 hover:text-sky-400 transition-all cursor-pointer"
+                            title="مدیریت و صدور رسید"
+                          >
+                            <Printer size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setVisiblePhoneId(visiblePhoneId === s.id ? null : s.id);
+                            }}
+                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-300 hover:text-white transition-all relative cursor-pointer"
+                            title="شماره تماس"
+                          >
+                            <Phone size={15} />
+                            <AnimatePresence>
+                              {visiblePhoneId === s.id && (
+                                <motion.div
+                                  initial={{ opacity: 0, scale: 0.9, y: 8 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.9, y: 8 }}
+                                  className="absolute left-1/2 -translate-x-1/2 top-full mt-1 bg-[#12121C] text-white border border-red-500/30 px-3 py-1 rounded-xl text-xs whitespace-nowrap shadow-xl z-40 font-mono"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {s.phone || 'ثبت نشده'}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </button>
+                          {(s.hasReceipt || s.receiptUrl) && (
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  if (s.receiptUrl) {
+                                    setSelectedReceipt(s.receiptUrl);
+                                    return;
+                                  }
+                                  const data = await fetchJSON(`/api/students/${s.id}/receipt`);
+                                  setSelectedReceipt(data.receiptUrl || null);
+                                } catch (err: any) {
+                                  alert(err?.message || 'رسید در دسترس نیست');
+                                }
+                              }}
+                              className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-300 hover:text-emerald-400 transition-all cursor-pointer"
+                              title="مشاهده رسید"
+                            >
+                              <Receipt size={15} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingStudent(s);
+                            }}
+                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-slate-300 hover:text-sky-400 transition-all cursor-pointer"
+                            title="ویرایش پرداخت"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteStudent(s.id);
+                            }}
+                            className="p-1.5 hover:bg-red-900/40 rounded-lg text-rose-300 hover:text-rose-400 hover:bg-rose-950/60 transition-all cursor-pointer"
+                            title="حذف دانشجو"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
